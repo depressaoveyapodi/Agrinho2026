@@ -1,0 +1,106 @@
+:root {
+    --primary-color: #2e7d32;
+    --secondary-color: #81c784;
+    --background: #f1f8e9;
+    --dark: #1b5e20;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--background);
+    color: #333;
+    margin: 0;
+    padding: 0;
+    text-align: center;
+}
+
+header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 20px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+main {
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 10px;
+}
+
+#status-panel {
+    display: flex;
+    justify-content: space-around;
+    margin-bottom: 20px;
+}
+
+.status-box {
+    background: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border-bottom: 4px solid var(--secondary-color);
+}
+
+#market-section {
+    background: #e8f5e9;
+    border: 2px dashed var(--primary-color);
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 30px;
+}
+
+#sell-btn {
+    background-color: var(--dark);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    font-size: 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+#sell-btn:hover {
+    background-color: var(--primary-color);
+}
+
+#farm-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.plot {
+    background: #d7ccc8;
+    border: 3px solid #8d6e63;
+    border-radius: 10px;
+    padding: 20px;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.plot:hover {
+    transform: scale(1.03);
+}
+
+.plot.ready {
+    background: #c8e6c9;
+    border-color: var(--primary-color);
+}
+
+.plot-btn {
+    margin-top: 8px;
+    background: white;
+    border: 1px solid #777;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
