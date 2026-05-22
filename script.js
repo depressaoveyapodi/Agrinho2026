@@ -2,6 +2,9 @@
 let money = 50;
 let ecoPoints = 0;
 let water = 100;
+// Estado do sistema de chuva
+let isRaining = false;
+let rainTimer = null;
 
 // Inventário de colheita do jogador
 let inventory = {
@@ -75,6 +78,16 @@ function updateUI() {
     document.getElementById("rain-status").innerText = isRaining ? "Chovendo" : "Nenhuma";
     updateAutomationStatus();
     updateInventoryUI();
+    // Atualiza multiplicador de venda conforme eco-points
+    const mult = getSellMultiplier();
+    document.getElementById("sell-multiplier").innerText = `${Math.round((mult - 1) * 100)}%`;
+}
+
+function getSellMultiplier() {
+    if (ecoPoints >= 500) return 1.5; // +50%
+    if (ecoPoints >= 100) return 1.25; // +25%
+    if (ecoPoints >= 50) return 1.10; // +10%
+    return 1.0;
 }
 
 function updateAutomationStatus() {
@@ -144,7 +157,7 @@ function startPestChecks() {
     setInterval(() => {
         plotsState.forEach((state, index) => {
             if (state.status === "plantado" || state.status === "pronto") {
-                if (Math.random() < 0.25) {
+                if (Math.random() < 0.15) {
                     handlePestAttack(index);
                 }
             }
@@ -455,7 +468,10 @@ function deliverOrder() {
 
     const removed = removeInventory(currentOrder.item, currentOrder.quantity);
     const cropPrice = cropsConfig[currentOrder.item].price;
-    const reward = cropPrice * removed.good + Math.floor(cropPrice / 2) * removed.spoiled;
+    const multiplier = getSellMultiplier();
+    const goodPrice = Math.round(cropPrice * multiplier);
+    const spoiledPrice = Math.round((cropPrice / 2) * multiplier);
+    const reward = goodPrice * removed.good + spoiledPrice * removed.spoiled;
     money += reward;
     ecoPoints += currentOrder.quantity * 2;
     let message = `Pedido entregue! Você ganhou ${reward} moedas e ${currentOrder.quantity * 2} eco-pontos.`;
