@@ -16,14 +16,39 @@
         <section id="status-panel">
             <div class="status-box">💰 Moedas: <span id="money">10</span></div>
             <div class="status-box">💧 Água Disponível: <span id="water-level">100</span>%</div>
+            <div class="status-box">🌧️ Chuva: <span id="rain-status">Nenhuma</span></div>
             <div class="status-box">✨ Eco-Pontos: <span id="eco-points">0</span></div>
         </section>
 
-        <section id="market-section">
-            <h2>🛒 Pedido do Cliente</h2>
-            <p id="order-text">Carregando pedido...</p>
-            <button id="sell-btn" onclick="deliverOrder()">Entregar Pedido Orgânico</button>
+        <section id="inventory-section" class="inventory-section">
+            <h2>🎒 Mochila</h2>
+            <div id="inventory-items" class="inventory-items"></div>
         </section>
+
+        <div id="shop-market" class="shop-market">
+            <section id="shop-section" class="shop-section">
+                <h2>🏪 Lojinha</h2>
+                <p>Compre recursos e automações para sua fazenda sustentável.</p>
+                <button id="buy-vinegar-btn" class="shop-btn" onclick="buyVinegarWater()">Comprar Água com Vinagre - 50 moedas</button>
+                <p>Estoque: <span id="vinegar-count">0</span></p>
+                <button id="buy-auto-plant-btn" class="shop-btn" onclick="buyAutoPlant()">Automatizar Plantio - 500 moedas</button>
+                <p>Status: <span id="auto-plant-status">Desativado</span></p>
+                <button id="buy-auto-delivery-btn" class="shop-btn" onclick="buyAutoDelivery()">Automatizar Entrega - 750 moedas</button>
+                <p>Status: <span id="auto-delivery-status">Desativado</span></p>
+                <button id="buy-auto-pest-btn" class="shop-btn" onclick="buyAutoPestDefense()">Automatizar Combate de Pragas - 1000 moedas</button>
+                <p>Status: <span id="auto-pest-status">Desativado</span></p>
+            </section>
+
+            <section id="market-section">
+                <h2>🛒 Pedido do Cliente</h2>
+                <p id="order-text">Carregando pedido...</p>
+                <div id="crop-selection" class="crop-selection">
+                    <h3>Escolha a cultura para plantar</h3>
+                    <div id="crop-options" class="crop-options"></div>
+                </div>
+                <button id="sell-btn" onclick="deliverOrder()">Entregar Pedido Orgânico</button>
+            </section>
+        </div>
 
         <h2>🚜 Seus Canteiros Sustentáveis</h2>
         <section id="farm-grid">
