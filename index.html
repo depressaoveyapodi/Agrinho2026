@@ -30,7 +30,7 @@
             <section id="shop-section" class="shop-section">
                 <h2>🏪 Lojinha</h2>
                 <p>Compre recursos e automações para sua fazenda sustentável.</p>
-                <button id="buy-vinegar-btn" class="shop-btn" onclick="buyVinegarWater()">Comprar Água com Vinagre - 50 moedas</button>
+                <button id="buy-vinegar-btn" class="shop-btn" onclick="buyVinegarWater()">Comprar Spray de Alho e Pimenta - 50 moedas</button>
                 <p>Estoque: <span id="vinegar-count">0</span></p>
                 <button id="buy-auto-plant-btn" class="shop-btn" onclick="buyAutoPlant()">Automatizar Plantio - 500 moedas</button>
                 <p>Status: <span id="auto-plant-status">Desativado</span></p>
@@ -52,12 +52,22 @@
         </div>
 
         <h2>🚜 Seus Canteiros Sustentáveis</h2>
-        <section id="farm-grid">
+        <section id="farm-layout" class="farm-layout">
+            <section id="farm-grid" class="farm-grid"></section>
+
+            <section id="special-plot-section" class="special-plot-section">
+                <div class="special-plot-header">
+                    <h3>🌿 Canteiro Especial</h3>
+                    <p>Plante lavanda, rosa ou girassol aqui para atrair joaninhas.</p>
+                </div>
+                <div id="special-plot" class="special-plot"></div>
+                <div id="special-plot-options" class="special-plot-options"></div>
             </section>
+        </section>
     </main>
 
     <footer>
-        <p>Desenvolvido para o Concurso Agrinho 2026 - Em prol de um futuro sustentável.</p>
+        <p>Desenvolvido por Luis Dias</p>
     </footer>
 
     <script src="script.js"></script>
