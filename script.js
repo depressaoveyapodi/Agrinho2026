@@ -8,17 +8,17 @@ let rainTimer = null;
 
 // Inventário de colheita do jogador
 let inventory = {
-    Alface: { good: 0, spoiled: 0, fertilized: 0 },
-    Tomate: { good: 0, spoiled: 0, fertilized: 0 },
-    Cenoura: { good: 0, spoiled: 0, fertilized: 0 },
-    Morango: { good: 0, spoiled: 0, fertilized: 0 },
-    Abacaxi: { good: 0, spoiled: 0, fertilized: 0 },
-    Batata: { good: 0, spoiled: 0, fertilized: 0 },
-    Brocolis: { good: 0, spoiled: 0, fertilized: 0 },
-    Pimenta: { good: 0, spoiled: 0, fertilized: 0 },
-    Lavanda: { good: 0, spoiled: 0, fertilized: 0 },
-    Rosa: { good: 0, spoiled: 0, fertilized: 0 },
-    Girassol: { good: 0, spoiled: 0, fertilized: 0 }
+    Alface: { good: 0, spoiled: 0 },
+    Tomate: { good: 0, spoiled: 0 },
+    Cenoura: { good: 0, spoiled: 0 },
+    Morango: { good: 0, spoiled: 0 },
+    Abacaxi: { good: 0, spoiled: 0 },
+    Batata: { good: 0, spoiled: 0 },
+    Brocolis: { good: 0, spoiled: 0 },
+    Pimenta: { good: 0, spoiled: 0 },
+    Lavanda: { good: 0, spoiled: 0 },
+    Rosa: { good: 0, spoiled: 0 },
+    Girassol: { good: 0, spoiled: 0 }
 };
 // Tipos de sementes disponíveis
 const cropsConfig = {
@@ -38,17 +38,19 @@ const cropsConfig = {
 let currentOrder = null;
 let selectedCrop = "Alface";
 let selectedSpecialCrop = "Lavanda";
-let specialOrderCooldown = false;
 let vinegarWater = 0;
 let autoPlantEnabled = false;
 let autoDeliveryEnabled = false;
 let autoPestDefenseEnabled = false;
-let organicFertilizer = 0;
-let wormBoxPending = 0;
+let specialOrderCompleted = false;
+let wormBoxStored = 0;
+let wormBoxTimer = null;
+let wormBoxReadyAt = null;
+let organicCompostCount = 0;
 
 // Inicializar canteiros
 const totalPlots = 6;
-let plotsState = Array(totalPlots).fill(null).map(() => ({ status: "vazio", crop: null, timer: null, pestStatus: "normal", pestTimer: null, protectionTimer: null, fertilizerActive: false, fertilizerTimer: null }));
+let plotsState = Array(totalPlots).fill(null).map(() => ({ status: "vazio", crop: null, timer: null, pestStatus: "normal", pestTimer: null, protectionTimer: null, compostBoostUntil: null, compostTimer: null }));
 let specialPlotState = { status: "vazio", crop: null, timer: null };
 
 function initGame() {
@@ -76,6 +78,10 @@ function initGame() {
     startRainSystem();
 
     setInterval(() => {
+        updateUI();
+    }, 1000);
+
+    setInterval(() => {
         if (water < 100) {
             water = Math.min(100, water + 5);
             updateUI();
@@ -88,11 +94,12 @@ function updateUI() {
     document.getElementById("water-level").innerText = water;
     document.getElementById("eco-points").innerText = ecoPoints;
     document.getElementById("vinegar-count").innerText = vinegarWater;
-    document.getElementById("worm-box-count").innerText = wormBoxPending;
-    document.getElementById("organic-fertilizer-count").innerText = organicFertilizer;
     document.getElementById("rain-status").innerText = isRaining ? "Chovendo" : "Nenhuma";
+    document.getElementById("worm-box-count").innerText = wormBoxStored;
+    document.getElementById("organic-compost-count").innerText = organicCompostCount;
     updateAutomationStatus();
     updateInventoryUI();
+    updateWormBoxStatus();
     // Atualiza multiplicador de venda conforme eco-points
     const mult = getSellMultiplier();
     document.getElementById("sell-multiplier").innerText = `${Math.round((mult - 1) * 100)}%`;
@@ -111,6 +118,24 @@ function updateAutomationStatus() {
     document.getElementById("auto-pest-status").innerText = autoPestDefenseEnabled ? "Ativado" : "Desativado";
 }
 
+function updateWormBoxStatus() {
+    const statusElement = document.getElementById("worm-box-status");
+    if (!statusElement) return;
+
+    if (wormBoxStored === 0) {
+        statusElement.innerText = "Aguardando depósito de plantas infestadas.";
+        return;
+    }
+
+    if (wormBoxTimer && wormBoxReadyAt) {
+        const secondsLeft = Math.max(0, Math.ceil((wormBoxReadyAt - Date.now()) / 1000));
+        statusElement.innerText = `Pronto em ${secondsLeft}s para produzir adubo orgânico.`;
+        return;
+    }
+
+    statusElement.innerText = "Pronto para produzir adubo orgânico.";
+}
+
 function buyVinegarWater() {
     if (money < 50) {
         alert("Você não tem moedas suficientes para comprar spray de alho e pimenta.");
@@ -121,6 +146,69 @@ function buyVinegarWater() {
     vinegarWater += 1;
     updateUI();
     alert("Você comprou spray de alho e pimenta e está pronto para combater pragas!");
+}
+
+function depositInfestedPlants() {
+    const deposited = Object.values(inventory).reduce((total, cropInventory) => total + cropInventory.spoiled, 0);
+    if (deposited === 0) {
+        alert("Não há plantas infestadas para depositar na caixa de minhocas.");
+        return;
+    }
+
+    Object.keys(inventory).forEach(cropName => {
+        inventory[cropName].spoiled = 0;
+    });
+
+    wormBoxStored += deposited;
+    if (!wormBoxTimer) {
+        wormBoxReadyAt = Date.now() + 45000;
+        wormBoxTimer = setTimeout(() => {
+            produceOrganicCompost();
+        }, 45000);
+    }
+
+    updateUI();
+    alert(`Você depositou ${deposited} plantas infestadas. As minhocas vão produzir adubo em 45 segundos.`);
+}
+
+function produceOrganicCompost() {
+    if (wormBoxStored === 0) {
+        wormBoxTimer = null;
+        wormBoxReadyAt = null;
+        updateUI();
+        return;
+    }
+
+    organicCompostCount += 6;
+    ecoPoints += 2;
+    wormBoxStored = 0;
+    wormBoxTimer = null;
+    wormBoxReadyAt = null;
+    applyCompostToPlots();
+    updateUI();
+}
+
+function applyCompostToPlots() {
+    plotsState.forEach((state, index) => {
+        if (state.compostTimer) {
+            clearTimeout(state.compostTimer);
+        }
+        state.compostBoostUntil = Date.now() + 90000;
+        state.compostTimer = setTimeout(() => removeCompost(index), 90000);
+        updatePlotUI(index);
+    });
+}
+
+function removeCompost(index) {
+    const state = plotsState[index];
+    if (!state) return;
+    state.compostBoostUntil = null;
+    if (state.compostTimer) {
+        clearTimeout(state.compostTimer);
+        state.compostTimer = null;
+    }
+    updatePlotUI(index);
+    updateUI();
 }
 
 function buyAutoPlant() {
@@ -273,22 +361,6 @@ function autoPestDefense() {
     });
 }
 
-function applyOrganicFertilizerToPlots() {
-    const fertilizerUnits = Math.min(organicFertilizer, plotsState.length);
-    if (fertilizerUnits <= 0) return;
-
-    organicFertilizer = Math.max(0, organicFertilizer - fertilizerUnits);
-    plotsState.forEach((state, index) => {
-        if (state.fertilizerTimer) {
-            clearTimeout(state.fertilizerTimer);
-        }
-        state.fertilizerActive = true;
-        state.fertilizerTimer = setTimeout(() => removeOrganicFertilizer(index), 90000);
-        updatePlotUI(index);
-    });
-    updateUI();
-}
-
 function handlePestAttack(index) {
     const state = plotsState[index];
     if (!state || (state.status !== "plantado" && state.status !== "pronto")) return;
@@ -360,27 +432,14 @@ function destroyInfestedPlot(index) {
         clearTimeout(state.protectionTimer);
         state.protectionTimer = null;
     }
-    if (state.fertilizerTimer) {
-        clearTimeout(state.fertilizerTimer);
-        state.fertilizerTimer = null;
-    }
     state.status = "vazio";
     state.crop = null;
     state.timer = null;
     state.pestTimer = null;
     state.pestStatus = "normal";
-    state.fertilizerActive = false;
     updatePlotUI(index);
     updateUI();
     alert(`Pragas destruíram a plantação de ${cropName}!`);
-}
-
-function removeOrganicFertilizer(index) {
-    const state = plotsState[index];
-    if (!state) return;
-    state.fertilizerActive = false;
-    state.fertilizerTimer = null;
-    updatePlotUI(index);
 }
 
 function updateInventoryUI() {
@@ -389,16 +448,13 @@ function updateInventoryUI() {
 
     for (const cropName in inventory) {
         const goodCount = inventory[cropName].good;
-        const fertilizedCount = inventory[cropName].fertilized;
         const spoiledCount = inventory[cropName].spoiled;
         const crop = cropsConfig[cropName];
-        const totalCount = goodCount + fertilizedCount + spoiledCount;
         const item = document.createElement("div");
         item.className = "inventory-item";
         item.innerHTML = `
             <strong>${crop.icon} ${cropName}</strong>
-            <span>${totalCount} unidade${totalCount === 1 ? "" : "s"}</span>
-            ${fertilizedCount > 0 ? `<span>${fertilizedCount} premium</span>` : ""}
+            <span>${goodCount + spoiledCount} unidade${goodCount + spoiledCount === 1 ? "" : "s"}</span>
             ${spoiledCount > 0 ? `<span>${spoiledCount} danificada${spoiledCount === 1 ? "" : "s"}</span>` : ""}
         `;
         inventoryContainer.appendChild(item);
@@ -406,23 +462,19 @@ function updateInventoryUI() {
 }
 
 function getInventoryTotal(cropName) {
-    return inventory[cropName].good + inventory[cropName].fertilized + inventory[cropName].spoiled;
+    return inventory[cropName].good + inventory[cropName].spoiled;
 }
 
 function removeInventory(cropName, quantity) {
     let remaining = quantity;
-    const fertilized = inventory[cropName].fertilized;
-    const useFertilized = Math.min(fertilized, remaining);
-    remaining -= useFertilized;
     const goods = inventory[cropName].good;
+    const spoiled = inventory[cropName].spoiled;
     const useGood = Math.min(goods, remaining);
     remaining -= useGood;
-    const spoiled = inventory[cropName].spoiled;
     const useSpoiled = Math.min(spoiled, remaining);
-    inventory[cropName].fertilized -= useFertilized;
     inventory[cropName].good -= useGood;
     inventory[cropName].spoiled -= useSpoiled;
-    return { fertilized: useFertilized, good: useGood, spoiled: useSpoiled };
+    return { good: useGood, spoiled: useSpoiled };
 }
 
 function updateOrderUI() {
@@ -431,8 +483,9 @@ function updateOrderUI() {
         orderText.innerText = "Carregando pedido...";
         return;
     }
-    const specialLabel = currentOrder.special ? " (Pedido Especial)" : "";
-    orderText.innerText = `Cliente pede ${currentOrder.quantity}x ${currentOrder.item}${specialLabel}.`;
+
+    const specialLabel = currentOrder.special ? "Pedido especial" : "Pedido";
+    orderText.innerText = `${specialLabel}: ${currentOrder.quantity}x ${currentOrder.item}.`;
 }
 
 function renderCropOptions() {
@@ -486,9 +539,6 @@ function updatePlotUI(index) {
     plot.className = "plot";
     plot.innerHTML = "";
 
-    if (state.fertilizerActive) {
-        plot.classList.add("fertilized");
-    }
     if (state.pestStatus === "infestada") {
         plot.classList.add("infested");
     } else if (state.pestStatus === "protected") {
@@ -499,24 +549,24 @@ function updatePlotUI(index) {
         plot.innerHTML = `<strong>Terra livre</strong><div class="plot-btn">Clique para plantar</div>`;
     } else if (state.status === "plantado") {
         plot.innerHTML = `<div>${state.crop.icon}</div><strong>${state.crop.name}</strong><div>Em crescimento...</div>`;
-        if (state.fertilizerActive) {
-            plot.innerHTML += `<div class="plot-status fertilizado">Adubo orgânico ativo</div>`;
-        }
         if (state.pestStatus === "infestada") {
             plot.innerHTML += `<div class="plot-status infestada">Plantação infestada! As pragas estão por perto.</div><div class="plot-btn" onclick="applyVinegarProtection(${index}); event.stopPropagation();">Usar spray de alho e pimenta</div>`;
         } else if (state.pestStatus === "protected") {
             plot.innerHTML += `<div class="plot-status protegida">Protegida por 2 minutos</div>`;
+        }
+        if (state.compostBoostUntil && state.compostBoostUntil > Date.now()) {
+            plot.innerHTML += `<div class="plot-status protegida">Adubo orgânico ativo (+25% qualidade)</div>`;
         }
     } else if (state.status === "pronto") {
         plot.classList.add("ready");
         plot.innerHTML = `<div>${state.crop.icon}</div><strong>${state.crop.name}</strong><div>Pronto para colher</div><div class="plot-btn">Clique para colher</div>`;
-        if (state.fertilizerActive) {
-            plot.innerHTML += `<div class="plot-status fertilizado">Adubo orgânico ativo</div>`;
-        }
         if (state.pestStatus === "infestada") {
             plot.innerHTML += `<div class="plot-status infestada">Plantação infestada! As pragas estão por perto.</div><div class="plot-btn" onclick="applyVinegarProtection(${index}); event.stopPropagation();">Usar spray de alho e pimenta</div>`;
         } else if (state.pestStatus === "protected") {
             plot.innerHTML += `<div class="plot-status protegida">Protegida por 2 minutos</div>`;
+        }
+        if (state.compostBoostUntil && state.compostBoostUntil > Date.now()) {
+            plot.innerHTML += `<div class="plot-status protegida">Adubo orgânico ativo (+25% qualidade)</div>`;
         }
     }
 }
@@ -532,12 +582,25 @@ function updateSpecialPlotUI() {
     }
 
     plot.classList.add("protected");
-    const preserveMessage = ecoPoints >= 150 ? "Flores preservadas com 150 eco-pontos. Troque a variedade quando quiser." : "Atraindo joaninhas até o fim do ciclo";
-    plot.innerHTML = `<div>${specialPlotState.crop.icon}</div><strong>${specialPlotState.crop.name}</strong><div>Joaninhas🐞 protegendo</div><div class="plot-status protegida">${preserveMessage}</div>`;
+    const preserveBonus = ecoPoints >= 150;
+    const statusText = preserveBonus ? "Flores preservadas por eco-pontos. Troque a variedade plantando novamente." : "Atraindo joaninhas até o fim do ciclo";
+    plot.innerHTML = `<div>${specialPlotState.crop.icon}</div><strong>${specialPlotState.crop.name}</strong><div>Joaninhas🐞 protegendo</div><div class="plot-status protegida">${statusText}</div><div class="plot-btn" onclick="interactSpecialPlot(); event.stopPropagation();">Trocar flor</div>`;
 }
 
 function interactSpecialPlot() {
     if (specialPlotState.status === "vazio") {
+        plantSpecialCrop();
+        return;
+    }
+
+    if (ecoPoints >= 150) {
+        if (specialPlotState.timer) {
+            clearTimeout(specialPlotState.timer);
+            specialPlotState.timer = null;
+        }
+        specialPlotState.status = "vazio";
+        specialPlotState.crop = null;
+        updateSpecialPlotUI();
         plantSpecialCrop();
     }
 }
@@ -559,28 +622,29 @@ function plantSpecialCrop() {
 
     if (specialPlotState.timer) {
         clearTimeout(specialPlotState.timer);
+        specialPlotState.timer = null;
     }
 
     money -= crop.cost;
     water = Math.max(0, water - 10);
     specialPlotState.status = "plantado";
     specialPlotState.crop = { ...crop, name: selectedSpecialCrop };
-    if (ecoPoints < 150) {
-        specialPlotState.timer = setTimeout(() => completeSpecialCrop(), crop.time);
-    } else {
-        specialPlotState.timer = null;
-    }
+    specialPlotState.timer = setTimeout(() => completeSpecialCrop(), crop.time);
     updateSpecialPlotUI();
     updateUI();
 }
 
 function completeSpecialCrop() {
     if (!specialPlotState.crop) return;
+
     if (ecoPoints >= 150) {
+        specialPlotState.status = "plantado";
         specialPlotState.timer = null;
         updateSpecialPlotUI();
+        updateUI();
         return;
     }
+
     specialPlotState.status = "vazio";
     specialPlotState.crop = null;
     specialPlotState.timer = null;
@@ -613,9 +677,6 @@ function plantCrop(index, cropName = selectedCrop) {
     if (state.timer) {
         clearTimeout(state.timer);
     }
-    if (state.fertilizerTimer) {
-        clearTimeout(state.fertilizerTimer);
-    }
 
     money -= crop.cost;
     water = Math.max(0, water - 10);
@@ -624,8 +685,6 @@ function plantCrop(index, cropName = selectedCrop) {
     state.timer = setTimeout(() => completeCrop(index), crop.time);
     state.pestTimer = null;
     state.pestStatus = state.pestStatus === "protected" ? "protected" : "normal";
-    state.fertilizerActive = false;
-    state.fertilizerTimer = null;
     updatePlotUI(index);
     updateUI();
 }
@@ -644,10 +703,12 @@ function harvestCrop(index, silent = false) {
 
     const cropName = state.crop.name;
     const wasInfested = state.pestStatus === "infestada";
-    if (wasInfested) {
+    const compostBoostActive = Boolean(state.compostBoostUntil && state.compostBoostUntil > Date.now());
+
+    if (wasInfested && compostBoostActive) {
+        inventory[cropName].good += 1;
+    } else if (wasInfested) {
         inventory[cropName].spoiled += 1;
-    } else if (state.fertilizerActive) {
-        inventory[cropName].fertilized += 1;
     } else {
         inventory[cropName].good += 1;
     }
@@ -659,55 +720,38 @@ function harvestCrop(index, silent = false) {
         clearTimeout(state.protectionTimer);
         state.protectionTimer = null;
     }
-    if (state.fertilizerTimer) {
-        clearTimeout(state.fertilizerTimer);
-        state.fertilizerTimer = null;
+    if (state.compostTimer) {
+        clearTimeout(state.compostTimer);
+        state.compostTimer = null;
     }
     state.status = "vazio";
     state.crop = null;
     state.timer = null;
     state.pestTimer = null;
     state.pestStatus = "normal";
-    state.fertilizerActive = false;
+    state.compostBoostUntil = null;
     updatePlotUI(index);
     updateUI();
     if (!silent) {
-        alert(`Você colheu ${cropName}!${wasInfested ? " Essa colheita está danificada e terá metade do valor de venda." : ""}`);
+        alert(`Você colheu ${cropName}!${wasInfested && !compostBoostActive ? " Essa colheita está danificada e terá metade do valor de venda." : ""}`);
     }
 }
 
 function generateNewOrder() {
     const sellableCrops = Object.keys(cropsConfig).filter(cropName => cropsConfig[cropName].sellable !== false);
     const item = sellableCrops[Math.floor(Math.random() * sellableCrops.length)];
-    const specialOrder = !specialOrderCooldown && Math.random() < 0.2;
-    const quantity = specialOrder ? 3 + Math.floor(Math.random() * 3) : Math.floor(Math.random() * 2) + 1;
-    currentOrder = { item, quantity, special: specialOrder };
-    specialOrderCooldown = specialOrder;
+
+    let quantity = Math.floor(Math.random() * 2) + 1;
+    let isSpecial = false;
+
+    if (!specialOrderCompleted && Math.random() < 0.2) {
+        isSpecial = true;
+        specialOrderCompleted = true;
+        quantity = 4 + Math.floor(Math.random() * 3);
+    }
+
+    currentOrder = { item, quantity, special: isSpecial };
     updateOrderUI();
-}
-
-function depositInfestedPlants() {
-    const totalSpoiled = Object.values(inventory).reduce((sum, item) => sum + item.spoiled, 0);
-    if (totalSpoiled === 0) {
-        alert("Não há plantas infestadas colhidas para depositar.");
-        return;
-    }
-
-    wormBoxPending += totalSpoiled;
-    Object.keys(inventory).forEach((cropName) => {
-        inventory[cropName].spoiled = 0;
-    });
-    updateUI();
-
-    for (let i = 0; i < totalSpoiled; i++) {
-        setTimeout(() => {
-            organicFertilizer += 6;
-            ecoPoints += 2;
-            wormBoxPending = Math.max(0, wormBoxPending - 1);
-            applyOrganicFertilizerToPlots();
-            updateUI();
-        }, 45000);
-    }
 }
 
 function deliverOrder() {
@@ -725,18 +769,14 @@ function deliverOrder() {
     const removed = removeInventory(currentOrder.item, currentOrder.quantity);
     const cropPrice = cropsConfig[currentOrder.item].price;
     const multiplier = getSellMultiplier();
-    const premiumPrice = Math.round(cropPrice * 1.25 * multiplier);
     const goodPrice = Math.round(cropPrice * multiplier);
     const spoiledPrice = Math.round((cropPrice / 2) * multiplier);
-    const reward = premiumPrice * removed.fertilized + goodPrice * removed.good + spoiledPrice * removed.spoiled;
+    const reward = goodPrice * removed.good + spoiledPrice * removed.spoiled;
     money += reward;
     ecoPoints += currentOrder.quantity * 2;
-    let message = `Pedido ${currentOrder.special ? "especial" : "orgânico"} entregue! Você ganhou ${reward} moedas e ${currentOrder.quantity * 2} eco-pontos.`;
+    let message = `Pedido entregue! Você ganhou ${reward} moedas e ${currentOrder.quantity * 2} eco-pontos.`;
     if (removed.spoiled > 0) {
         message += ` (${removed.spoiled} unidade${removed.spoiled === 1 ? "" : "s"} danificada${removed.spoiled === 1 ? "" : "s"} vendida com metade do valor.)`;
-    }
-    if (removed.fertilized > 0) {
-        message += ` (${removed.fertilized} unidade${removed.fertilized === 1 ? "" : "s"} premium vendida com 25% de bônus.)`;
     }
     alert(message);
     generateNewOrder();

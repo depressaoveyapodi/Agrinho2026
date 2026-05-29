@@ -304,3 +304,22 @@ main {
     cursor: pointer;
     font-size: 12px;
 }
+
+.worm-box-section {
+    background: #e0f2f1;
+    border: 2px dashed #00695c;
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 16px;
+    text-align: left;
+}
+
+.worm-btn {
+    background: #00695c;
+    color: white;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+}
