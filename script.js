@@ -39,9 +39,15 @@ let currentOrder = null;
 let selectedCrop = "Alface";
 let selectedSpecialCrop = "Lavanda";
 let vinegarWater = 0;
+let autoPlantPurchased = false;
 let autoPlantEnabled = false;
+let autoDeliveryPurchased = false;
 let autoDeliveryEnabled = false;
+let autoPestDefensePurchased = false;
 let autoPestDefenseEnabled = false;
+let flowerBedUnlocked = false;
+let wormBoxUnlocked = false;
+let extraPlotsUnlocked = false;
 let specialOrderCompleted = false;
 let wormBoxStored = 0;
 let wormBoxTimer = null;
@@ -49,9 +55,32 @@ let wormBoxReadyAt = null;
 let organicCompostCount = 0;
 
 // Inicializar canteiros
-const totalPlots = 6;
-let plotsState = Array(totalPlots).fill(null).map(() => ({ status: "vazio", crop: null, timer: null, pestStatus: "normal", pestTimer: null, protectionTimer: null, compostBoostUntil: null, compostTimer: null }));
-let specialPlotState = { status: "vazio", crop: null, timer: null };
+const totalPlots = 9;
+let plotsState = Array.from({ length: totalPlots }, (_, index) => ({
+    status: index < 6 ? "vazio" : "locked",
+    crop: null,
+    timer: null,
+    dueAt: null,
+    pestStatus: "normal",
+    pestTimer: null,
+    protectionTimer: null,
+    compostBoostUntil: null,
+    compostTimer: null
+}));
+let specialPlotState = { status: "vazio", crop: null, timer: null, dueAt: null };
+let suppressSaveOnUnload = false;
+let totalPlayTimeMs = 0;
+let lastPlayUpdate = Date.now();
+const specialOrderThresholdMs = 25 * 60 * 1000;
+
+function beforeUnloadSave() {
+    const now = Date.now();
+    totalPlayTimeMs += now - lastPlayUpdate;
+    lastPlayUpdate = now;
+    if (!suppressSaveOnUnload) {
+        saveProgress(true);
+    }
+}
 
 function initGame() {
     const grid = document.getElementById("farm-grid");
@@ -69,7 +98,14 @@ function initGame() {
     renderCropOptions();
     renderSpecialCropOptions();
     updateSpecialPlotUI();
-    generateNewOrder();
+    const loaded = loadProgress(true);
+    if (!loaded) {
+        if (!localStorage.getItem("ecoFazendaIntroSeen")) {
+            showIntroMessage();
+        }
+        generateNewOrder();
+    }
+    lastPlayUpdate = Date.now();
     updateUI();
     updateOrderUI();
     updateInventoryUI();
@@ -78,6 +114,9 @@ function initGame() {
     startRainSystem();
 
     setInterval(() => {
+        const now = Date.now();
+        totalPlayTimeMs += now - lastPlayUpdate;
+        lastPlayUpdate = now;
         updateUI();
     }, 1000);
 
@@ -87,6 +126,8 @@ function initGame() {
             updateUI();
         }
     }, 4000);
+
+    window.addEventListener("beforeunload", beforeUnloadSave);
 }
 
 function updateUI() {
@@ -95,11 +136,44 @@ function updateUI() {
     document.getElementById("eco-points").innerText = ecoPoints;
     document.getElementById("vinegar-count").innerText = vinegarWater;
     document.getElementById("rain-status").innerText = isRaining ? "Chovendo" : "Nenhuma";
+    document.getElementById("play-time").innerText = formatTime(totalPlayTimeMs);
     document.getElementById("worm-box-count").innerText = wormBoxStored;
     document.getElementById("organic-compost-count").innerText = organicCompostCount;
     updateAutomationStatus();
+    updateAutomationButtons();
+    unlockExtraPlots();
     updateInventoryUI();
+    updateSpecialPlotUI();
     updateWormBoxStatus();
+
+    const saveStatusEl = document.getElementById("save-status");
+    if (saveStatusEl) {
+        saveStatusEl.innerText = localStorage.getItem("ecoFazendaSave") ? "Progresso salvo disponível." : "Nenhum progresso salvo.";
+    }
+
+    const flowerStatusEl = document.getElementById("flower-bed-status");
+    if (flowerStatusEl) {
+        flowerStatusEl.innerText = flowerBedUnlocked ? "Desbloqueado" : "Bloqueado (50 eco-pontos e 200 moedas)";
+    }
+    const wormStatusEl = document.getElementById("worm-box-unlock-status");
+    if (wormStatusEl) {
+        wormStatusEl.innerText = wormBoxUnlocked ? "Desbloqueada" : "Bloqueada (100 eco-pontos e 300 moedas)";
+    }
+    const flowerBtn = document.getElementById("unlock-flower-bed-btn");
+    if (flowerBtn) {
+        flowerBtn.disabled = flowerBedUnlocked;
+        if (flowerBedUnlocked) flowerBtn.innerText = "Canteiro de flores desbloqueado";
+    }
+    const wormBtn = document.getElementById("unlock-worm-box-btn");
+    if (wormBtn) {
+        wormBtn.disabled = wormBoxUnlocked;
+        if (wormBoxUnlocked) wormBtn.innerText = "Caixa de minhocas desbloqueada";
+    }
+    const depositBtn = document.querySelector('.worm-btn');
+    if (depositBtn) {
+        depositBtn.disabled = !wormBoxUnlocked;
+    }
+
     // Atualiza multiplicador de venda conforme eco-points
     const mult = getSellMultiplier();
     document.getElementById("sell-multiplier").innerText = `${Math.round((mult - 1) * 100)}%`;
@@ -113,14 +187,63 @@ function getSellMultiplier() {
 }
 
 function updateAutomationStatus() {
-    document.getElementById("auto-plant-status").innerText = autoPlantEnabled ? "Ativado" : "Desativado";
-    document.getElementById("auto-delivery-status").innerText = autoDeliveryEnabled ? "Ativado" : "Desativado";
-    document.getElementById("auto-pest-status").innerText = autoPestDefenseEnabled ? "Ativado" : "Desativado";
+    if (autoPlantEnabled) autoPlantPurchased = true;
+    if (autoDeliveryEnabled) autoDeliveryPurchased = true;
+    if (autoPestDefenseEnabled) autoPestDefensePurchased = true;
+
+    document.getElementById("auto-plant-status").innerText = autoPlantEnabled ? "Ativado" : autoPlantPurchased ? "Desativado" : "Não comprado";
+    document.getElementById("auto-delivery-status").innerText = autoDeliveryEnabled ? "Ativado" : autoDeliveryPurchased ? "Desativado" : "Não comprado";
+    document.getElementById("auto-pest-status").innerText = autoPestDefenseEnabled ? "Ativado" : autoPestDefensePurchased ? "Desativado" : "Não comprado";
+}
+
+function updateAutomationButtons() {
+    const plantBtn = document.getElementById("buy-auto-plant-btn");
+    const deliveryBtn = document.getElementById("buy-auto-delivery-btn");
+    const pestBtn = document.getElementById("buy-auto-pest-btn");
+
+    if (autoPlantPurchased) {
+        plantBtn.innerText = autoPlantEnabled ? "Desativar Plantio Automático" : "Ativar Plantio Automático";
+    } else {
+        plantBtn.innerText = "Comprar Plantio Automático - 500 moedas";
+    }
+
+    if (autoDeliveryPurchased) {
+        deliveryBtn.innerText = autoDeliveryEnabled ? "Desativar Entrega Automática" : "Ativar Entrega Automática";
+    } else {
+        deliveryBtn.innerText = "Comprar Entrega Automática - 750 moedas";
+    }
+
+    if (autoPestDefensePurchased) {
+        pestBtn.innerText = autoPestDefenseEnabled ? "Desativar Defesa contra Pragas" : "Ativar Defesa contra Pragas";
+    } else {
+        pestBtn.innerText = "Comprar Defesa contra Pragas - 1000 moedas";
+    }
+}
+
+function unlockExtraPlots() {
+    if (extraPlotsUnlocked || ecoPoints < 150) return;
+    let unlockedAny = false;
+    plotsState.forEach((state, index) => {
+        if (state.status === "locked") {
+            state.status = "vazio";
+            updatePlotUI(index);
+            unlockedAny = true;
+        }
+    });
+    if (unlockedAny) {
+        extraPlotsUnlocked = true;
+        alert("Parabéns! Três canteiros adicionais foram desbloqueados por atingir 150 eco-pontos.");
+    }
 }
 
 function updateWormBoxStatus() {
     const statusElement = document.getElementById("worm-box-status");
     if (!statusElement) return;
+
+    if (!wormBoxUnlocked) {
+        statusElement.innerText = "Caixa de minhocas bloqueada. Desbloqueie-a na lojinha para começar a usar.";
+        return;
+    }
 
     if (wormBoxStored === 0) {
         statusElement.innerText = "Aguardando depósito de plantas infestadas.";
@@ -149,6 +272,11 @@ function buyVinegarWater() {
 }
 
 function depositInfestedPlants() {
+    if (!wormBoxUnlocked) {
+        alert("Você precisa desbloquear a caixa de minhocas antes de depositar plantas infestadas.");
+        return;
+    }
+
     const deposited = Object.values(inventory).reduce((total, cropInventory) => total + cropInventory.spoiled, 0);
     if (deposited === 0) {
         alert("Não há plantas infestadas para depositar na caixa de minhocas.");
@@ -171,6 +299,284 @@ function depositInfestedPlants() {
     alert(`Você depositou ${deposited} plantas infestadas. As minhocas vão produzir adubo em 45 segundos.`);
 }
 
+function buyAutoPlant() {
+    if (!autoPlantPurchased) {
+        if (money < 500) {
+            alert("Você não tem moedas suficientes para automatizar o plantio.");
+            return;
+        }
+        money -= 500;
+        autoPlantPurchased = true;
+        autoPlantEnabled = true;
+        updateUI();
+        alert("Plantio automatizado comprado e ativado! O sistema irá plantar sempre que houver canteiros livres e condições.");
+        return;
+    }
+    autoPlantEnabled = !autoPlantEnabled;
+    updateUI();
+    alert(`Plantio automático ${autoPlantEnabled ? "ativado" : "desativado"}.`);
+}
+
+function buyAutoDelivery() {
+    if (!autoDeliveryPurchased) {
+        if (money < 750) {
+            alert("Você não tem moedas suficientes para automatizar as entregas.");
+            return;
+        }
+        money -= 750;
+        autoDeliveryPurchased = true;
+        autoDeliveryEnabled = true;
+        updateUI();
+        alert("Entrega automatizada comprada e ativada! O pedido será enviado automaticamente quando estiver pronto.");
+        return;
+    }
+    autoDeliveryEnabled = !autoDeliveryEnabled;
+    updateUI();
+    alert(`Entrega automática ${autoDeliveryEnabled ? "ativada" : "desativada"}.`);
+}
+
+function buyAutoPestDefense() {
+    if (!autoPestDefensePurchased) {
+        if (money < 1000) {
+            alert("Você não tem moedas suficientes para automatizar o combate de pragas.");
+            return;
+        }
+        money -= 1000;
+        autoPestDefensePurchased = true;
+        autoPestDefenseEnabled = true;
+        updateUI();
+        alert("Proteção automática contra pragas comprada e ativada! O sistema protegerá canteiros infestados automaticamente sem consumir spray.");
+        return;
+    }
+    autoPestDefenseEnabled = !autoPestDefenseEnabled;
+    updateUI();
+    alert(`Defesa automática contra pragas ${autoPestDefenseEnabled ? "ativada" : "desativada"}.`);
+}
+
+function saveProgress(silent = false) {
+    const saveData = {
+        money,
+        ecoPoints,
+        water,
+        isRaining,
+        vinegarWater,
+        autoPlantPurchased,
+        autoPlantEnabled,
+        autoDeliveryPurchased,
+        autoDeliveryEnabled,
+        autoPestDefensePurchased,
+        autoPestDefenseEnabled,
+        flowerBedUnlocked,
+        wormBoxUnlocked,
+        extraPlotsUnlocked,
+        specialOrderCompleted,
+        wormBoxStored,
+        wormBoxReadyAt,
+        organicCompostCount,
+        currentOrder,
+        selectedCrop,
+        selectedSpecialCrop,
+        inventory,
+        totalPlayTimeMs,
+        plotsState: plotsState.map(state => ({
+            status: state.status,
+            cropName: state.crop?.name || null,
+            pestStatus: state.pestStatus,
+            compostBoostUntil: state.compostBoostUntil,
+            dueAt: state.dueAt
+        })),
+        specialPlotState: {
+            status: specialPlotState.status,
+            cropName: specialPlotState.crop?.name || null,
+            dueAt: specialPlotState.dueAt
+        }
+    };
+
+    localStorage.setItem("ecoFazendaSave", JSON.stringify(saveData));
+    if (!silent) {
+        alert("Progresso salvo com sucesso!");
+    }
+}
+
+function clearProgress() {
+    if (!confirm("Tem certeza que deseja limpar todo o progresso salvo? Esta ação não pode ser desfeita.")) {
+        return;
+    }
+    localStorage.removeItem("ecoFazendaSave");
+    localStorage.removeItem("ecoFazendaIntroSeen");
+    suppressSaveOnUnload = true;
+    alert("Progresso salvo limpo. O jogo será reiniciado para zerar todas as compras e progressos.");
+    location.reload();
+}
+
+function restoreTimers() {
+    const now = Date.now();
+    plotsState.forEach((state, index) => {
+        if (state.timer) {
+            clearTimeout(state.timer);
+            state.timer = null;
+        }
+
+        if (state.status === "plantado") {
+            const remaining = state.dueAt ? Math.max(0, state.dueAt - now) : 0;
+            if (remaining <= 0) {
+                completeCrop(index);
+            } else {
+                state.timer = setTimeout(() => completeCrop(index), remaining);
+            }
+        } else {
+            state.dueAt = null;
+        }
+    });
+
+    if (specialPlotState.timer) {
+        clearTimeout(specialPlotState.timer);
+        specialPlotState.timer = null;
+    }
+    if (specialPlotState.status === "plantado") {
+        const remaining = specialPlotState.dueAt ? Math.max(0, specialPlotState.dueAt - now) : 0;
+        if (remaining <= 0) {
+            completeSpecialCrop();
+        } else {
+            specialPlotState.timer = setTimeout(() => completeSpecialCrop(), remaining);
+        }
+    } else {
+        specialPlotState.dueAt = null;
+    }
+
+    if (wormBoxTimer) {
+        clearTimeout(wormBoxTimer);
+        wormBoxTimer = null;
+    }
+    if (wormBoxUnlocked && wormBoxStored > 0 && wormBoxReadyAt) {
+        const remaining = Math.max(0, wormBoxReadyAt - now);
+        if (remaining <= 0) {
+            produceOrganicCompost();
+        } else {
+            wormBoxTimer = setTimeout(() => produceOrganicCompost(), remaining);
+        }
+    } else {
+        wormBoxReadyAt = null;
+    }
+}
+
+function loadProgress(silent = false) {
+    const saveString = localStorage.getItem("ecoFazendaSave");
+    if (!saveString) {
+        if (!silent) {
+            alert("Nenhum progresso salvo encontrado.");
+            if (!localStorage.getItem("ecoFazendaIntroSeen")) {
+                showIntroMessage();
+            }
+        }
+        return false;
+    }
+
+    try {
+        const saveData = JSON.parse(saveString);
+        money = saveData.money ?? money;
+        ecoPoints = saveData.ecoPoints ?? ecoPoints;
+        water = saveData.water ?? water;
+        isRaining = saveData.isRaining ?? isRaining;
+        vinegarWater = saveData.vinegarWater ?? vinegarWater;
+        autoPlantPurchased = saveData.autoPlantPurchased ?? autoPlantPurchased;
+        autoPlantEnabled = saveData.autoPlantEnabled ?? autoPlantEnabled;
+        autoDeliveryPurchased = saveData.autoDeliveryPurchased ?? autoDeliveryPurchased;
+        autoDeliveryEnabled = saveData.autoDeliveryEnabled ?? autoDeliveryEnabled;
+        autoPestDefensePurchased = saveData.autoPestDefensePurchased ?? autoPestDefensePurchased;
+        autoPestDefenseEnabled = saveData.autoPestDefenseEnabled ?? autoPestDefenseEnabled;
+
+        if (autoPlantEnabled) autoPlantPurchased = true;
+        if (autoDeliveryEnabled) autoDeliveryPurchased = true;
+        if (autoPestDefenseEnabled) autoPestDefensePurchased = true;
+        flowerBedUnlocked = saveData.flowerBedUnlocked ?? flowerBedUnlocked;
+        wormBoxUnlocked = saveData.wormBoxUnlocked ?? wormBoxUnlocked;
+        extraPlotsUnlocked = saveData.extraPlotsUnlocked ?? extraPlotsUnlocked;
+        specialOrderCompleted = saveData.specialOrderCompleted ?? specialOrderCompleted;
+        wormBoxStored = saveData.wormBoxStored ?? wormBoxStored;
+        wormBoxReadyAt = saveData.wormBoxReadyAt ?? null;
+        organicCompostCount = saveData.organicCompostCount ?? organicCompostCount;
+        totalPlayTimeMs = saveData.totalPlayTimeMs ?? totalPlayTimeMs;
+        currentOrder = normalizeOrder(saveData.currentOrder) || currentOrder;
+        selectedCrop = saveData.selectedCrop ?? selectedCrop;
+        selectedSpecialCrop = saveData.selectedSpecialCrop ?? selectedSpecialCrop;
+        inventory = saveData.inventory ?? inventory;
+
+        plotsState = (saveData.plotsState || plotsState).map((savedState, index) => ({
+            status: savedState.status || "vazio",
+            crop: savedState.cropName ? { ...cropsConfig[savedState.cropName], name: savedState.cropName } : null,
+            timer: null,
+            dueAt: savedState.dueAt || null,
+            pestStatus: savedState.pestStatus || "normal",
+            pestTimer: null,
+            protectionTimer: null,
+            compostBoostUntil: savedState.compostBoostUntil || null,
+            compostTimer: null
+        }));
+
+        const specialSaved = saveData.specialPlotState || {};
+        specialPlotState = {
+            status: specialSaved.status || "vazio",
+            crop: specialSaved.cropName ? { ...cropsConfig[specialSaved.cropName], name: specialSaved.cropName } : null,
+            timer: null,
+            dueAt: specialSaved.dueAt || null
+        };
+
+        restoreTimers();
+        updateUI();
+        updateOrderUI();
+        updateInventoryUI();
+        updateSpecialPlotUI();
+        plotsState.forEach((_, index) => updatePlotUI(index));
+
+        lastPlayUpdate = Date.now();
+        if (!silent) alert("Progresso carregado com sucesso!");
+        return true;
+    } catch (error) {
+        console.error(error);
+        if (!silent) alert("Falha ao carregar o progresso salvo.");
+        return false;
+    }
+}
+
+function unlockFlowerBed() {
+    if (flowerBedUnlocked) {
+        alert("O canteiro de flores já está desbloqueado.");
+        return;
+    }
+    if (ecoPoints < 50) {
+        alert("Você precisa de pelo menos 50 eco-pontos para desbloquear o canteiro de flores.");
+        return;
+    }
+    if (money < 200) {
+        alert("Você não tem moedas suficientes para desbloquear o canteiro de flores.");
+        return;
+    }
+    money -= 200;
+    flowerBedUnlocked = true;
+    updateUI();
+    alert("Canteiro de flores desbloqueado! Agora você pode plantar lavanda, rosa e girassol.");
+}
+
+function unlockWormBox() {
+    if (wormBoxUnlocked) {
+        alert("A caixa de minhocas já está desbloqueada.");
+        return;
+    }
+    if (ecoPoints < 100) {
+        alert("Você precisa de pelo menos 100 eco-pontos para desbloquear a caixa de minhocas.");
+        return;
+    }
+    if (money < 300) {
+        alert("Você não tem moedas suficientes para desbloquear a caixa de minhocas.");
+        return;
+    }
+    money -= 300;
+    wormBoxUnlocked = true;
+    updateUI();
+    alert("Caixa de minhocas desbloqueada! Deposite plantas infestadas para produzir adubo orgânico.");
+}
+
 function produceOrganicCompost() {
     if (wormBoxStored === 0) {
         wormBoxTimer = null;
@@ -190,6 +596,7 @@ function produceOrganicCompost() {
 
 function applyCompostToPlots() {
     plotsState.forEach((state, index) => {
+        if (state.status === "vazio" || state.status === "locked") return;
         if (state.compostTimer) {
             clearTimeout(state.compostTimer);
         }
@@ -211,55 +618,10 @@ function removeCompost(index) {
     updateUI();
 }
 
-function buyAutoPlant() {
-    if (autoPlantEnabled) {
-        alert("Automatização de plantio já está ativada.");
-        return;
-    }
-    if (money < 500) {
-        alert("Você não tem moedas suficientes para automatizar o plantio.");
-        return;
-    }
-    money -= 500;
-    autoPlantEnabled = true;
-    updateUI();
-    alert("Plantio automatizado ativado! O sistema irá plantar sempre que houver canteiros livres e condições.");
-}
-
-function buyAutoDelivery() {
-    if (autoDeliveryEnabled) {
-        alert("Automatização de entrega já está ativada.");
-        return;
-    }
-    if (money < 750) {
-        alert("Você não tem moedas suficientes para automatizar as entregas.");
-        return;
-    }
-    money -= 750;
-    autoDeliveryEnabled = true;
-    updateUI();
-    alert("Entrega automatizada ativada! O pedido será enviado automaticamente quando estiver pronto.");
-}
-
-function buyAutoPestDefense() {
-    if (autoPestDefenseEnabled) {
-        alert("Automatização de combate a pragas já está ativada.");
-        return;
-    }
-    if (money < 1000) {
-        alert("Você não tem moedas suficientes para automatizar o combate de pragas.");
-        return;
-    }
-    money -= 1000;
-    autoPestDefenseEnabled = true;
-    updateUI();
-    alert("Proteção automática contra pragas ativada! O sistema protegerá canteiros infestados automaticamente sem consumir spray.");
-}
-
 function startPestChecks() {
     setInterval(() => {
-        const hasLadybugs = Boolean(specialPlotState.crop);
-        const pestChance = hasLadybugs ? 0.05 : 0.15;
+        const hasLadybugs = specialPlotState.status === "plantado" && specialPlotState.crop;
+        const pestChance = hasLadybugs ? 0.04 : 0.15;
 
         if (hasLadybugs) {
             plotsState.forEach((state, index) => {
@@ -272,6 +634,9 @@ function startPestChecks() {
         plotsState.forEach((state, index) => {
             if (state.status === "plantado" || state.status === "pronto") {
                 if (Math.random() < pestChance) {
+                    if (hasLadybugs && Math.random() < 0.75) {
+                        return;
+                    }
                     handlePestAttack(index);
                 }
             }
@@ -284,7 +649,6 @@ function startAutomationLoops() {
         if (autoPlantEnabled) {
             autoPlant();
         }
-        autoHarvest();
         if (autoDeliveryEnabled) {
             autoDeliver();
         }
@@ -296,7 +660,7 @@ function startAutomationLoops() {
 
 function startRainSystem() {
     setInterval(() => {
-        if (!isRaining && Math.random() < 0.2) {
+        if (!isRaining && Math.random() < 0.1) {
             startRain();
         }
     }, 30000);
@@ -321,20 +685,33 @@ function startRain() {
 function autoPlant() {
     if (!currentOrder) return;
 
-    const cropName = currentOrder.item;
-    const crop = cropsConfig[cropName];
-    if (!crop) return;
+    const neededItems = currentOrder.items
+        .map(orderItem => ({
+            ...orderItem,
+            current: getOrderCurrentCount(orderItem.item),
+            remaining: Math.max(0, orderItem.quantity - getOrderCurrentCount(orderItem.item))
+        }))
+        .filter(orderItem => orderItem.remaining > 0);
 
-    const currentCount = plotsState
-        .filter(state => state.crop?.name === cropName && state.status !== "vazio")
-        .length + getInventoryTotal(cropName);
+    if (neededItems.length === 0) return;
 
-    if (currentCount >= currentOrder.quantity) return;
+    const emptyPlotIndexes = plotsState
+        .map((state, index) => (state.status === "vazio" ? index : null))
+        .filter(index => index !== null);
 
-    const emptyIndex = plotsState.findIndex(state => state.status === "vazio");
-    if (emptyIndex === -1) return;
-    if (money < crop.cost || water < 10) return;
-    plantCrop(emptyIndex, cropName);
+    if (emptyPlotIndexes.length === 0) return;
+
+    for (const emptyIndex of emptyPlotIndexes) {
+        const nextOrder = neededItems.find(orderItem => orderItem.remaining > 0);
+        if (!nextOrder) break;
+
+        const crop = cropsConfig[nextOrder.item];
+        if (!crop) break;
+        if (money < crop.cost || water < 10) break;
+
+        plantCrop(emptyIndex, nextOrder.item);
+        nextOrder.remaining -= 1;
+    }
 }
 
 function autoHarvest() {
@@ -347,8 +724,15 @@ function autoHarvest() {
 
 function autoDeliver() {
     if (!currentOrder) return;
-    const have = getInventoryTotal(currentOrder.item);
-    if (have >= currentOrder.quantity) {
+
+    plotsState.forEach((state, index) => {
+        if (state.status === "pronto" && currentOrder.items.some(orderItem => orderItem.item === state.crop?.name)) {
+            harvestCrop(index, true);
+        }
+    });
+
+    const isComplete = currentOrder.items.every(orderItem => getInventoryTotal(orderItem.item) >= orderItem.quantity);
+    if (isComplete) {
         deliverOrder();
     }
 }
@@ -461,8 +845,24 @@ function updateInventoryUI() {
     }
 }
 
+function formatTime(ms) {
+    if (ms <= 0) return "0:00";
+    const totalSeconds = Math.ceil(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 function getInventoryTotal(cropName) {
     return inventory[cropName].good + inventory[cropName].spoiled;
+}
+
+function getPlantedCount(cropName) {
+    return plotsState.filter(state => state.crop?.name === cropName && state.status !== "vazio").length;
+}
+
+function getOrderCurrentCount(cropName) {
+    return getInventoryTotal(cropName) + getPlantedCount(cropName);
 }
 
 function removeInventory(cropName, quantity) {
@@ -477,6 +877,31 @@ function removeInventory(cropName, quantity) {
     return { good: useGood, spoiled: useSpoiled };
 }
 
+function normalizeOrder(order) {
+    if (!order) return null;
+    if (Array.isArray(order.items)) return order;
+    if (order.item && order.quantity) {
+        return {
+            items: [{ item: order.item, quantity: order.quantity }],
+            special: order.special || false
+        };
+    }
+    return null;
+}
+
+function showIntroMessage() {
+    const intro = document.getElementById("intro-message");
+    if (!intro) return;
+    intro.classList.remove("hidden");
+}
+
+function dismissIntroMessage() {
+    const intro = document.getElementById("intro-message");
+    if (!intro) return;
+    intro.classList.add("hidden");
+    localStorage.setItem("ecoFazendaIntroSeen", "true");
+}
+
 function updateOrderUI() {
     const orderText = document.getElementById("order-text");
     if (!currentOrder) {
@@ -485,7 +910,8 @@ function updateOrderUI() {
     }
 
     const specialLabel = currentOrder.special ? "Pedido especial" : "Pedido";
-    orderText.innerText = `${specialLabel}: ${currentOrder.quantity}x ${currentOrder.item}.`;
+    const lines = currentOrder.items.map(orderItem => `${orderItem.quantity}x ${orderItem.item}`);
+    orderText.innerHTML = `${specialLabel}:<br>${lines.join("<br>")}`;
 }
 
 function renderCropOptions() {
@@ -539,6 +965,12 @@ function updatePlotUI(index) {
     plot.className = "plot";
     plot.innerHTML = "";
 
+    if (state.status === "locked") {
+        plot.classList.add("locked");
+        plot.innerHTML = `<strong>Canteiro bloqueado</strong><div class="plot-status infestada">Desbloqueie ao atingir 150 eco-pontos.</div>`;
+        return;
+    }
+
     if (state.pestStatus === "infestada") {
         plot.classList.add("infested");
     } else if (state.pestStatus === "protected") {
@@ -576,18 +1008,28 @@ function updateSpecialPlotUI() {
     plot.className = "special-plot";
     plot.innerHTML = "";
 
+    if (!flowerBedUnlocked) {
+        plot.innerHTML = `<div class="special-plot-title">🌿 Canteiro de Flores Bloqueado</div><div>Desbloqueie por 200 moedas após atingir 50 eco-pontos.</div><div class="plot-btn unlock-btn" id="unlock-flower-bed-btn" onclick="unlockFlowerBed(); event.stopPropagation();">Desbloquear Canteiro de Flores - 200 moedas</div>`;
+        return;
+    }
+
     if (specialPlotState.status === "vazio") {
         plot.innerHTML = `<div class="special-plot-title">🌿 ${selectedSpecialCrop}</div><div>Terra livre para flores.</div><div class="plot-btn" onclick="interactSpecialPlot(); event.stopPropagation();">Plantar ${selectedSpecialCrop}</div>`;
         return;
     }
 
     plot.classList.add("protected");
-    const preserveBonus = ecoPoints >= 150;
-    const statusText = preserveBonus ? "Flores preservadas por eco-pontos. Troque a variedade plantando novamente." : "Atraindo joaninhas até o fim do ciclo";
-    plot.innerHTML = `<div>${specialPlotState.crop.icon}</div><strong>${specialPlotState.crop.name}</strong><div>Joaninhas🐞 protegendo</div><div class="plot-status protegida">${statusText}</div><div class="plot-btn" onclick="interactSpecialPlot(); event.stopPropagation();">Trocar flor</div>`;
+    const timeText = specialPlotState.dueAt ? `Tempo restante: ${formatTime(specialPlotState.dueAt - Date.now())}` : (ecoPoints >= 150 ? "Flores preservadas por eco-pontos." : "Flores prontas. Troque a variedade plantando novamente.");
+    const statusText = ecoPoints >= 150 ? "Flores preservadas por eco-pontos. Troque a variedade plantando novamente." : "Atraindo joaninhas até o fim do ciclo";
+    plot.innerHTML = `<div>${specialPlotState.crop.icon}</div><strong>${specialPlotState.crop.name}</strong><div>Joaninhas🐞 protegendo</div><div class="plot-status protegida">${statusText}</div><div class="plot-status protegida">${timeText}</div><div class="plot-btn" onclick="interactSpecialPlot(); event.stopPropagation();">Trocar flor</div>`;
 }
 
 function interactSpecialPlot() {
+    if (!flowerBedUnlocked) {
+        alert("Você precisa desbloquear o canteiro de flores antes de plantar aqui.");
+        return;
+    }
+
     if (specialPlotState.status === "vazio") {
         plantSpecialCrop();
         return;
@@ -606,6 +1048,11 @@ function interactSpecialPlot() {
 }
 
 function plantSpecialCrop() {
+    if (!flowerBedUnlocked) {
+        alert("Você precisa desbloquear o canteiro de flores antes de plantar aqui.");
+        return;
+    }
+
     const crop = cropsConfig[selectedSpecialCrop];
     if (crop.sellable !== false) {
         alert("Apenas culturas ornamentais podem ser plantadas no canteiro especial.");
@@ -629,6 +1076,7 @@ function plantSpecialCrop() {
     water = Math.max(0, water - 10);
     specialPlotState.status = "plantado";
     specialPlotState.crop = { ...crop, name: selectedSpecialCrop };
+    specialPlotState.dueAt = Date.now() + crop.time;
     specialPlotState.timer = setTimeout(() => completeSpecialCrop(), crop.time);
     updateSpecialPlotUI();
     updateUI();
@@ -639,21 +1087,33 @@ function completeSpecialCrop() {
 
     if (ecoPoints >= 150) {
         specialPlotState.status = "plantado";
+        specialPlotState.dueAt = null;
         specialPlotState.timer = null;
         updateSpecialPlotUI();
         updateUI();
         return;
     }
 
+    if (wormBoxUnlocked) {
+        organicCompostCount += 2;
+        applyCompostToPlots();
+        alert("As flores do canteiro especial viraram adubo orgânico graças ao minhocário e foram aplicadas automaticamente!");
+    }
+
     specialPlotState.status = "vazio";
     specialPlotState.crop = null;
     specialPlotState.timer = null;
+    specialPlotState.dueAt = null;
     updateSpecialPlotUI();
     updateUI();
 }
 
 function interactPlot(index) {
     const state = plotsState[index];
+    if (state.status === "locked") {
+        alert("Este canteiro ainda está bloqueado. Alcance 150 eco-pontos para desbloquear mais canteiros.");
+        return;
+    }
     if (state.status === "vazio") {
         plantCrop(index);
     } else if (state.status === "pronto") {
@@ -682,6 +1142,7 @@ function plantCrop(index, cropName = selectedCrop) {
     water = Math.max(0, water - 10);
     state.status = "plantado";
     state.crop = { ...crop, name: cropName };
+    state.dueAt = Date.now() + crop.time;
     state.timer = setTimeout(() => completeCrop(index), crop.time);
     state.pestTimer = null;
     state.pestStatus = state.pestStatus === "protected" ? "protected" : "normal";
@@ -694,6 +1155,7 @@ function completeCrop(index) {
     if (!state || state.status !== "plantado") return;
 
     state.status = "pronto";
+    state.dueAt = null;
     updatePlotUI(index);
 }
 
@@ -739,18 +1201,32 @@ function harvestCrop(index, silent = false) {
 
 function generateNewOrder() {
     const sellableCrops = Object.keys(cropsConfig).filter(cropName => cropsConfig[cropName].sellable !== false);
-    const item = sellableCrops[Math.floor(Math.random() * sellableCrops.length)];
-
-    let quantity = Math.floor(Math.random() * 2) + 1;
+    let items = [];
     let isSpecial = false;
+    const specialOrderAllowed = totalPlayTimeMs >= specialOrderThresholdMs;
 
-    if (!specialOrderCompleted && Math.random() < 0.2) {
+    if (specialOrderAllowed && Math.random() < 0.25) {
         isSpecial = true;
-        specialOrderCompleted = true;
-        quantity = 4 + Math.floor(Math.random() * 3);
+        if (Math.random() < 0.6) {
+            const item = sellableCrops[Math.floor(Math.random() * sellableCrops.length)];
+            const quantity = 10 + Math.floor(Math.random() * 6);
+            items.push({ item, quantity });
+        } else {
+            const orderCount = 2 + Math.floor(Math.random() * 2);
+            const selected = [...sellableCrops].sort(() => Math.random() - 0.5).slice(0, orderCount);
+            items = selected.map(cropName => ({ item: cropName, quantity: 5 + Math.floor(Math.random() * 4) }));
+        }
+    } else if (Math.random() < 0.4) {
+        const orderCount = 2 + Math.floor(Math.random() * 2);
+        const selected = [...sellableCrops].sort(() => Math.random() - 0.5).slice(0, orderCount);
+        items = selected.map(cropName => ({ item: cropName, quantity: 1 + Math.floor(Math.random() * 3) }));
+    } else {
+        const item = sellableCrops[Math.floor(Math.random() * sellableCrops.length)];
+        const quantity = 1 + Math.floor(Math.random() * 4);
+        items.push({ item, quantity });
     }
 
-    currentOrder = { item, quantity, special: isSpecial };
+    currentOrder = { items, special: isSpecial };
     updateOrderUI();
 }
 
@@ -760,23 +1236,37 @@ function deliverOrder() {
         return;
     }
 
-    const have = getInventoryTotal(currentOrder.item);
-    if (have < currentOrder.quantity) {
+    const missing = currentOrder.items.filter(orderItem => getInventoryTotal(orderItem.item) < orderItem.quantity);
+    if (missing.length > 0) {
         alert("Você ainda não tem o pedido completo. Continue colhendo.");
         return;
     }
 
-    const removed = removeInventory(currentOrder.item, currentOrder.quantity);
-    const cropPrice = cropsConfig[currentOrder.item].price;
     const multiplier = getSellMultiplier();
-    const goodPrice = Math.round(cropPrice * multiplier);
-    const spoiledPrice = Math.round((cropPrice / 2) * multiplier);
-    const reward = goodPrice * removed.good + spoiledPrice * removed.spoiled;
+    let reward = 0;
+    let ecoGain = 0;
+    let damagedMessages = [];
+
+    currentOrder.items.forEach(orderItem => {
+        const removed = removeInventory(orderItem.item, orderItem.quantity);
+        const cropPrice = cropsConfig[orderItem.item].price;
+        const goodPrice = Math.round(cropPrice * multiplier);
+        const spoiledPrice = Math.round((cropPrice / 2) * multiplier);
+
+        reward += goodPrice * removed.good + spoiledPrice * removed.spoiled;
+        ecoGain += orderItem.quantity * 2;
+
+        if (removed.spoiled > 0) {
+            damagedMessages.push(`${removed.spoiled}x ${orderItem.item}`);
+        }
+    });
+
     money += reward;
-    ecoPoints += currentOrder.quantity * 2;
-    let message = `Pedido entregue! Você ganhou ${reward} moedas e ${currentOrder.quantity * 2} eco-pontos.`;
-    if (removed.spoiled > 0) {
-        message += ` (${removed.spoiled} unidade${removed.spoiled === 1 ? "" : "s"} danificada${removed.spoiled === 1 ? "" : "s"} vendida com metade do valor.)`;
+    ecoPoints += ecoGain;
+
+    let message = `Pedido entregue! Você ganhou ${reward} moedas e ${ecoGain} eco-pontos.`;
+    if (damagedMessages.length > 0) {
+        message += ` (${damagedMessages.join(', ')} vendida${damagedMessages.length === 1 ? '' : 's'} com metade do valor.)`;
     }
     alert(message);
     generateNewOrder();

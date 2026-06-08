@@ -17,8 +17,23 @@
             <div class="status-box">💰 Moedas: <span id="money">10</span></div>
             <div class="status-box">💧 Água Disponível: <span id="water-level">100</span>%</div>
             <div class="status-box">🌧️ Chuva: <span id="rain-status">Nenhuma</span></div>
+            <div class="status-box">⏱️ Tempo Jogando: <span id="play-time">0:00</span></div>
             <div class="status-box">🪙 Multiplicador de Venda: <span id="sell-multiplier">0%</span></div>
             <div class="status-box">✨ Eco-Pontos: <span id="eco-points">0</span></div>
+        </section>
+
+        <section id="intro-message" class="intro-message hidden">
+            <h2>Bem-vindo à EcoFazenda!</h2>
+            <p>Este é um jogo de fazenda sustentável onde você planta, colhe e entrega pedidos orgânicos.</p>
+            <p>O objetivo é:</p>
+            <ul>
+                <li>Plantar culturas nos canteiros para atender pedidos</li>
+                <li>Usar automações para plantar, entregar e proteger contra pragas</li>
+                <li>Desbloquear o canteiro de flores e o minhocário para obter bônus</li>
+                <li>Transformar flores e plantas infestadas em adubo orgânico</li>
+            </ul>
+            <p>Comece escolhendo uma cultura na lojinha de culturas, plante nos canteiros e cumpra o pedido do cliente.</p>
+            <button class="intro-close-btn" onclick="dismissIntroMessage()">Entendi, vamos jogar!</button>
         </section>
 
         <section id="inventory-section" class="inventory-section">
@@ -27,8 +42,8 @@
         </section>
 
         <div id="shop-market" class="shop-market">
-            <section id="shop-section" class="shop-section">
-                <h2>🏪 Lojinha</h2>
+            <section id="function-shop-section" class="shop-section">
+                <h2>🏪 Lojinha de Funções</h2>
                 <p>Compre recursos e automações para sua fazenda sustentável.</p>
                 <button id="buy-vinegar-btn" class="shop-btn" onclick="buyVinegarWater()">Comprar Spray de Alho e Pimenta - 50 moedas</button>
                 <p>Estoque: <span id="vinegar-count">0</span></p>
@@ -38,16 +53,25 @@
                 <p>Status: <span id="auto-delivery-status">Desativado</span></p>
                 <button id="buy-auto-pest-btn" class="shop-btn" onclick="buyAutoPestDefense()">Automatizar Combate de Pragas - 1000 moedas</button>
                 <p>Status: <span id="auto-pest-status">Desativado</span></p>
+                <div class="shop-note">Os desbloqueios de Canteiro de Flores e Caixa de Minhocas agora aparecem diretamente em suas áreas.</div>
+                <button id="save-progress-btn" class="shop-btn" onclick="saveProgress()">Salvar Progresso</button>
+                <button id="load-progress-btn" class="shop-btn" onclick="loadProgress()">Carregar Progresso</button>
+                <button id="clear-progress-btn" class="shop-btn" onclick="clearProgress()">Limpar Progresso</button>
+                <p id="save-status">Nenhum progresso salvo.</p>
             </section>
 
-            <section id="market-section">
-                <h2>🛒 Pedido do Cliente</h2>
-                <p id="order-text">Carregando pedido...</p>
+            <section id="culture-shop-section" class="shop-section">
+                <h2>🌾 Lojinha de Culturas</h2>
+                <p>Escolha a cultura que você quer plantar no próximo ciclo.</p>
                 <div id="crop-selection" class="crop-selection">
                     <h3>Escolha a cultura para plantar</h3>
                     <div id="crop-options" class="crop-options"></div>
                 </div>
-                <button id="sell-btn" onclick="deliverOrder()">Entregar Pedido Orgânico</button>
+                <div class="order-box">
+                    <h3>🛒 Pedido do Cliente</h3>
+                    <p id="order-text">Carregando pedido...</p>
+                    <button id="sell-btn" class="shop-btn" onclick="deliverOrder()">Entregar Pedido Orgânico</button>
+                </div>
             </section>
         </div>
 
@@ -61,13 +85,16 @@
                     <p>Plante lavanda, rosa ou girassol aqui para atrair joaninhas.</p>
                 </div>
                 <div id="special-plot" class="special-plot"></div>
+                <p class="special-plot-status-text">Status: <span id="flower-bed-status">Bloqueado</span></p>
                 <div id="special-plot-options" class="special-plot-options"></div>
             </section>
         </section>
 
         <section id="worm-box-section" class="worm-box-section">
             <h2>🪱 Caixa de Minhocas</h2>
-            <p>Deposite plantas infestadas colhidas para produzir adubo orgânico em 45 segundos.</p>
+            <p>Deposite plantas infestadas colhidas. Após 45 segundos, você recebe 6 adubos orgânicos que são aplicados automaticamente aos canteiros da fazenda (não nas flores).</p>
+            <button id="unlock-worm-box-btn" class="shop-btn unlock-btn" onclick="unlockWormBox()">Desbloquear Caixa de Minhocas - 300 moedas</button>
+            <p>Status: <span id="worm-box-unlock-status">Bloqueada</span></p>
             <button class="worm-btn" onclick="depositInfestedPlants()">Depositar plantas infestadas</button>
             <p>Plantinhas infestadas na caixa: <span id="worm-box-count">0</span></p>
             <p>Adubos orgânicos prontos: <span id="organic-compost-count">0</span></p>
