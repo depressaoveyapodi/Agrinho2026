@@ -177,7 +177,7 @@ function updateUI() {
     }
     const depositBtn = document.querySelector('.worm-btn');
     if (depositBtn) {
-        depositBtn.disabled = !wormBoxUnlocked;
+        depositBtn.disabled = !wormBoxUnlocked || wormBoxStored > 0 || (wormBoxReadyAt && wormBoxReadyAt > Date.now());
     }
 
     // Atualiza multiplicador de venda conforme eco-points
@@ -619,8 +619,14 @@ function clearGlobalCompostBoost() {
     }
     // Ao terminar boost global, aplica qualquer adubo pendente (produzido durante o boost)
     if (pendingCompost > 0) {
+        // Inicia um novo período global para o adubo pendente e aplica aos canteiros disponíveis
+        globalCompostBoostUntil = Date.now() + 90000;
+        if (globalCompostTimer) clearTimeout(globalCompostTimer);
+        globalCompostTimer = setTimeout(() => clearGlobalCompostBoost(), 90000);
+
         const applied = applyCompostToSpecificPlots(pendingCompost);
         pendingCompost = Math.max(0, pendingCompost - applied);
+        // Consumir dos adubos armazenados que já haviam sido contados em organicCompostCount
         organicCompostCount = Math.max(0, organicCompostCount - applied);
         if (applied > 0) {
             alert(`Adubo pendente aplicado a ${applied} canteiro${applied === 1 ? '' : 's'} após fim do boost.`);
@@ -660,6 +666,20 @@ function produceOrganicCompost() {
 
     // Produção baseada na quantidade de plantas danificadas depositadas
     const producedCompost = wormBoxStored * 6; // 6 adubos por planta depositada
+
+    // Se já existe um boost global ativo, armazenamos o adubo produzido em pendingCompost
+    if (globalCompostBoostUntil && globalCompostBoostUntil > Date.now()) {
+        pendingCompost += producedCompost;
+        ecoPoints += 2 * wormBoxStored; // ganha eco-points mesmo que adubo fique pendente
+        wormBoxStored = 0;
+        wormBoxTimer = null;
+        wormBoxReadyAt = null;
+        updateUI();
+        alert(`As minhocas produziram adubo orgânico, mas um boost já está ativo. O adubo foi armazenado (${producedCompost}) até o fim do boost atual.`);
+        return;
+    }
+
+    // Aplica imediatamente quando não há boost ativo
     organicCompostCount += producedCompost;
     ecoPoints += 2 * wormBoxStored; // ganha 2 eco-points por planta depositada
     globalCompostBoostUntil = Date.now() + 90000;
@@ -1395,5 +1415,7 @@ function deliverOrder() {
     generateNewOrder();
     updateUI();
 }
+
+function clearProgress() { clearSavedProgress(); }
 
 window.onload = initGame;
