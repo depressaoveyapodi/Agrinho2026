@@ -1,5 +1,5 @@
 // Variáveis do Jogo
-let money = 10000;
+let money = 150;
 let ecoPoints = 0;
 let water = 100;
 // Estado do sistema de chuva
@@ -53,6 +53,9 @@ let wormBoxStored = 0;
 let wormBoxTimer = null;
 let wormBoxReadyAt = null;
 let organicCompostCount = 0;
+let globalCompostBoostUntil = null;
+let globalCompostTimer = null;
+let pendingCompost = 0; // adubo produzido que aguarda aplicação enquanto um boost está ativo
 
 // Inicializar canteiros
 const totalPlots = 9;
@@ -113,6 +116,9 @@ function initGame() {
     startAutomationLoops();
     startRainSystem();
 
+    // Expor função de depuração para forçar pragas via console: `spawnPest()`
+    window.spawnPest = spawnPestOnRandomPlot;
+
     setInterval(() => {
         const now = Date.now();
         totalPlayTimeMs += now - lastPlayUpdate;
@@ -153,11 +159,11 @@ function updateUI() {
 
     const flowerStatusEl = document.getElementById("flower-bed-status");
     if (flowerStatusEl) {
-        flowerStatusEl.innerText = flowerBedUnlocked ? "Desbloqueado" : "Bloqueado (50 eco-pontos e 200 moedas)";
+        flowerStatusEl.innerText = flowerBedUnlocked ? "Desbloqueado" : "Bloqueado (25 eco-pontos e 200 moedas)";
     }
     const wormStatusEl = document.getElementById("worm-box-unlock-status");
     if (wormStatusEl) {
-        wormStatusEl.innerText = wormBoxUnlocked ? "Desbloqueada" : "Bloqueada (100 eco-pontos e 300 moedas)";
+        wormStatusEl.innerText = wormBoxUnlocked ? "Desbloqueada" : "Bloqueada (65 eco-pontos e 300 moedas)";
     }
     const flowerBtn = document.getElementById("unlock-flower-bed-btn");
     if (flowerBtn) {
@@ -276,16 +282,28 @@ function depositInfestedPlants() {
         alert("Você precisa desbloquear a caixa de minhocas antes de depositar plantas infestadas.");
         return;
     }
+    // Só permite depositar uma planta por vez até que o adubo seja produzido
+    if (wormBoxStored > 0) {
+        alert("A caixa de minhocas já contém uma planta. Aguarde a produção de adubo antes de depositar outra.");
+        return;
+    }
 
-    const deposited = Object.values(inventory).reduce((total, cropInventory) => total + cropInventory.spoiled, 0);
+    // Deposita apenas UMA planta infestada por vez (prioriza a primeira encontrada)
+    let deposited = 0;
+    let depositedCrop = null;
+    for (const cropName of Object.keys(inventory)) {
+        if (inventory[cropName].spoiled > 0) {
+            inventory[cropName].spoiled -= 1;
+            deposited = 1;
+            depositedCrop = cropName;
+            break;
+        }
+    }
+
     if (deposited === 0) {
         alert("Não há plantas infestadas para depositar na caixa de minhocas.");
         return;
     }
-
-    Object.keys(inventory).forEach(cropName => {
-        inventory[cropName].spoiled = 0;
-    });
 
     wormBoxStored += deposited;
     if (!wormBoxTimer) {
@@ -296,7 +314,7 @@ function depositInfestedPlants() {
     }
 
     updateUI();
-    alert(`Você depositou ${deposited} plantas infestadas. As minhocas vão produzir adubo em 45 segundos.`);
+    alert(`Você depositou ${deposited} planta infestada${deposited > 1 ? 's' : ''}${depositedCrop ? ' (' + depositedCrop + ')' : ''}. As minhocas vão produzir adubo em 45 segundos.`);
 }
 
 function buyAutoPlant() {
@@ -373,6 +391,8 @@ function saveProgress(silent = false) {
         wormBoxStored,
         wormBoxReadyAt,
         organicCompostCount,
+        pendingCompost,
+        globalCompostBoostUntil,
         currentOrder,
         selectedCrop,
         selectedSpecialCrop,
@@ -383,6 +403,7 @@ function saveProgress(silent = false) {
             cropName: state.crop?.name || null,
             pestStatus: state.pestStatus,
             compostBoostUntil: state.compostBoostUntil,
+            everInfested: state.everInfested || false,
             dueAt: state.dueAt
         })),
         specialPlotState: {
@@ -397,8 +418,7 @@ function saveProgress(silent = false) {
         alert("Progresso salvo com sucesso!");
     }
 }
-
-function clearProgress() {
+function clearSavedProgress() {
     if (!confirm("Tem certeza que deseja limpar todo o progresso salvo? Esta ação não pode ser desfeita.")) {
         return;
     }
@@ -458,6 +478,17 @@ function restoreTimers() {
     } else {
         wormBoxReadyAt = null;
     }
+
+    if (globalCompostTimer) {
+        clearTimeout(globalCompostTimer);
+        globalCompostTimer = null;
+    }
+    if (globalCompostBoostUntil && globalCompostBoostUntil > now) {
+        const remaining = globalCompostBoostUntil - now;
+        globalCompostTimer = setTimeout(() => clearGlobalCompostBoost(), remaining);
+    } else {
+        globalCompostBoostUntil = null;
+    }
 }
 
 function loadProgress(silent = false) {
@@ -496,6 +527,8 @@ function loadProgress(silent = false) {
         wormBoxStored = saveData.wormBoxStored ?? wormBoxStored;
         wormBoxReadyAt = saveData.wormBoxReadyAt ?? null;
         organicCompostCount = saveData.organicCompostCount ?? organicCompostCount;
+        pendingCompost = saveData.pendingCompost ?? pendingCompost;
+        globalCompostBoostUntil = saveData.globalCompostBoostUntil ?? null;
         totalPlayTimeMs = saveData.totalPlayTimeMs ?? totalPlayTimeMs;
         currentOrder = normalizeOrder(saveData.currentOrder) || currentOrder;
         selectedCrop = saveData.selectedCrop ?? selectedCrop;
@@ -511,6 +544,7 @@ function loadProgress(silent = false) {
             pestTimer: null,
             protectionTimer: null,
             compostBoostUntil: savedState.compostBoostUntil || null,
+            everInfested: savedState.everInfested || false,
             compostTimer: null
         }));
 
@@ -544,8 +578,8 @@ function unlockFlowerBed() {
         alert("O canteiro de flores já está desbloqueado.");
         return;
     }
-    if (ecoPoints < 50) {
-        alert("Você precisa de pelo menos 50 eco-pontos para desbloquear o canteiro de flores.");
+    if (ecoPoints < 25) {
+        alert("Você precisa de pelo menos 25 eco-pontos para desbloquear o canteiro de flores.");
         return;
     }
     if (money < 200) {
@@ -563,8 +597,8 @@ function unlockWormBox() {
         alert("A caixa de minhocas já está desbloqueada.");
         return;
     }
-    if (ecoPoints < 100) {
-        alert("Você precisa de pelo menos 100 eco-pontos para desbloquear a caixa de minhocas.");
+    if (ecoPoints < 65) {
+        alert("Você precisa de pelo menos 65 eco-pontos para desbloquear a caixa de minhocas.");
         return;
     }
     if (money < 300) {
@@ -577,6 +611,45 @@ function unlockWormBox() {
     alert("Caixa de minhocas desbloqueada! Deposite plantas infestadas para produzir adubo orgânico.");
 }
 
+function clearGlobalCompostBoost() {
+    globalCompostBoostUntil = null;
+    if (globalCompostTimer) {
+        clearTimeout(globalCompostTimer);
+        globalCompostTimer = null;
+    }
+    // Ao terminar boost global, aplica qualquer adubo pendente (produzido durante o boost)
+    if (pendingCompost > 0) {
+        const applied = applyCompostToSpecificPlots(pendingCompost);
+        pendingCompost = Math.max(0, pendingCompost - applied);
+        organicCompostCount = Math.max(0, organicCompostCount - applied);
+        if (applied > 0) {
+            alert(`Adubo pendente aplicado a ${applied} canteiro${applied === 1 ? '' : 's'} após fim do boost.`);
+        }
+    }
+    updateUI();
+}
+
+// Aplica adubo a um número limitado de canteiros desbloqueados (retorna quantos foram aplicados)
+function applyCompostToSpecificPlots(count) {
+    let applied = 0;
+    const boostUntil = Date.now() + 90000;
+    const remaining = 90000;
+    for (let index = 0; index < plotsState.length && applied < count; index++) {
+        const state = plotsState[index];
+        if (!state || state.status === 'locked') continue;
+        // pula canteiros que já estão adubados até depois
+        if (state.compostBoostUntil && state.compostBoostUntil > Date.now()) continue;
+        if (state.compostTimer) {
+            clearTimeout(state.compostTimer);
+        }
+        state.compostBoostUntil = boostUntil;
+        state.compostTimer = setTimeout(() => removeCompost(index), remaining);
+        updatePlotUI(index);
+        applied += 1;
+    }
+    return applied;
+}
+
 function produceOrganicCompost() {
     if (wormBoxStored === 0) {
         wormBoxTimer = null;
@@ -585,25 +658,45 @@ function produceOrganicCompost() {
         return;
     }
 
-    organicCompostCount += 6;
-    ecoPoints += 2;
+    // Produção baseada na quantidade de plantas danificadas depositadas
+    const producedCompost = wormBoxStored * 6; // 6 adubos por planta depositada
+    organicCompostCount += producedCompost;
+    ecoPoints += 2 * wormBoxStored; // ganha 2 eco-points por planta depositada
+    globalCompostBoostUntil = Date.now() + 90000;
+    if (globalCompostTimer) {
+        clearTimeout(globalCompostTimer);
+    }
+    globalCompostTimer = setTimeout(() => clearGlobalCompostBoost(), 90000);
+    const boostedPlots = applyCompostToPlots();
+    // consumir os adubos aplicados (1 adubo por canteiro aplicado)
+    organicCompostCount = Math.max(0, organicCompostCount - boostedPlots);
     wormBoxStored = 0;
     wormBoxTimer = null;
     wormBoxReadyAt = null;
-    applyCompostToPlots();
     updateUI();
+
+    if (boostedPlots > 0) {
+        alert(`As minhocas produziram adubo orgânico e ele foi aplicado automaticamente a ${boostedPlots} canteiro${boostedPlots === 1 ? '' : 's'}!`);
+    } else {
+        alert("As minhocas produziram adubo orgânico, mas não havia canteiros ativos para aplicar no momento.");
+    }
 }
 
 function applyCompostToPlots() {
+    let boostedCount = 0;
+    const boostUntil = globalCompostBoostUntil || (Date.now() + 90000);
+    const remaining = Math.max(0, boostUntil - Date.now());
     plotsState.forEach((state, index) => {
-        if (state.status === "vazio" || state.status === "locked") return;
+        if (state.status === "locked") return;
+        boostedCount += 1;
         if (state.compostTimer) {
             clearTimeout(state.compostTimer);
         }
-        state.compostBoostUntil = Date.now() + 90000;
-        state.compostTimer = setTimeout(() => removeCompost(index), 90000);
+        state.compostBoostUntil = boostUntil;
+        state.compostTimer = setTimeout(() => removeCompost(index), remaining);
         updatePlotUI(index);
     });
+    return boostedCount;
 }
 
 function removeCompost(index) {
@@ -634,7 +727,7 @@ function startPestChecks() {
         plotsState.forEach((state, index) => {
             if (state.status === "plantado" || state.status === "pronto") {
                 if (Math.random() < pestChance) {
-                    if (hasLadybugs && Math.random() < 0.75) {
+                    if (hasLadybugs && Math.random() < 0.85) {
                         return;
                     }
                     handlePestAttack(index);
@@ -643,6 +736,20 @@ function startPestChecks() {
         });
     }, 6000);
 }
+
+// Função de depuração: força infestação em uma plantação aleatória plantada/pronta
+function spawnPestOnRandomPlot() {
+    const plantedIndexes = plotsState
+        .map((s, i) => (s.status === "plantado" || s.status === "pronto") ? i : -1)
+        .filter(i => i !== -1);
+    if (plantedIndexes.length === 0) {
+        alert('Nenhuma plantação plantada para infectar.');
+        return;
+    }
+    const idx = plantedIndexes[Math.floor(Math.random() * plantedIndexes.length)];
+    handlePestAttack(idx);
+}
+
 
 function startAutomationLoops() {
     setInterval(() => {
@@ -752,6 +859,7 @@ function handlePestAttack(index) {
     if (state.pestStatus === "infestada") return;
 
     state.pestStatus = "infestada";
+    state.everInfested = true;
     if (state.pestTimer) {
         clearTimeout(state.pestTimer);
     }
@@ -780,6 +888,7 @@ function applyVinegarProtection(index, consumeSpray = true, silent = false) {
     }
     ecoPoints += 10;
     state.pestStatus = "protected";
+    state.everInfested = false;
     if (state.pestTimer) {
         clearTimeout(state.pestTimer);
         state.pestTimer = null;
@@ -821,6 +930,7 @@ function destroyInfestedPlot(index) {
     state.timer = null;
     state.pestTimer = null;
     state.pestStatus = "normal";
+    state.everInfested = false;
     updatePlotUI(index);
     updateUI();
     alert(`Pragas destruíram a plantação de ${cropName}!`);
@@ -979,6 +1089,9 @@ function updatePlotUI(index) {
 
     if (state.status === "vazio") {
         plot.innerHTML = `<strong>Terra livre</strong><div class="plot-btn">Clique para plantar</div>`;
+        if (state.compostBoostUntil && state.compostBoostUntil > Date.now()) {
+            plot.innerHTML += `<div class="plot-status protegida">Solo adubado (+25% qualidade)</div>`;
+        }
     } else if (state.status === "plantado") {
         plot.innerHTML = `<div>${state.crop.icon}</div><strong>${state.crop.name}</strong><div>Em crescimento...</div>`;
         if (state.pestStatus === "infestada") {
@@ -1009,7 +1122,7 @@ function updateSpecialPlotUI() {
     plot.innerHTML = "";
 
     if (!flowerBedUnlocked) {
-        plot.innerHTML = `<div class="special-plot-title">🌿 Canteiro de Flores Bloqueado</div><div>Desbloqueie por 200 moedas após atingir 50 eco-pontos.</div><div class="plot-btn unlock-btn" id="unlock-flower-bed-btn" onclick="unlockFlowerBed(); event.stopPropagation();">Desbloquear Canteiro de Flores - 200 moedas</div>`;
+        plot.innerHTML = `<div class="special-plot-title">🌿 Canteiro de Flores Bloqueado</div><div>Desbloqueie por 200 moedas após atingir 25 eco-pontos.</div><div class="plot-btn unlock-btn" id="unlock-flower-bed-btn" onclick="unlockFlowerBed(); event.stopPropagation();">Desbloquear Canteiro de Flores - 200 moedas</div>`;
         return;
     }
 
@@ -1146,6 +1259,15 @@ function plantCrop(index, cropName = selectedCrop) {
     state.timer = setTimeout(() => completeCrop(index), crop.time);
     state.pestTimer = null;
     state.pestStatus = state.pestStatus === "protected" ? "protected" : "normal";
+    state.everInfested = false;
+    if (globalCompostBoostUntil && globalCompostBoostUntil > Date.now()) {
+        const remaining = globalCompostBoostUntil - Date.now();
+        state.compostBoostUntil = globalCompostBoostUntil;
+        if (state.compostTimer) {
+            clearTimeout(state.compostTimer);
+        }
+        state.compostTimer = setTimeout(() => removeCompost(index), remaining);
+    }
     updatePlotUI(index);
     updateUI();
 }
@@ -1164,7 +1286,7 @@ function harvestCrop(index, silent = false) {
     if (!state || state.status !== "pronto") return;
 
     const cropName = state.crop.name;
-    const wasInfested = state.pestStatus === "infestada";
+    const wasInfested = state.pestStatus === "infestada" || Boolean(state.everInfested);
     const compostBoostActive = Boolean(state.compostBoostUntil && state.compostBoostUntil > Date.now());
 
     if (wasInfested && compostBoostActive) {
@@ -1192,6 +1314,7 @@ function harvestCrop(index, silent = false) {
     state.pestTimer = null;
     state.pestStatus = "normal";
     state.compostBoostUntil = null;
+    state.everInfested = false;
     updatePlotUI(index);
     updateUI();
     if (!silent) {
